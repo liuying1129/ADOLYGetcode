@@ -18,6 +18,9 @@
 {          8.20050906支持子查询                            }
 {          9.20050912增加InFieldLabel属性,显示在录入框前   }
 {          10.增加ifAbetChineseChar属性,是否可用汉字取码   }
+{          11.20210501增加对MySQL的支持.因依赖MyDAC组件,   }
+{              包路径增加***\VCL\MyDAC7.6.11\Source\Delphi7}
+{              否则包编译出错,找不到mydac70.bpl与dac70.bpl }
 {                                                          }
 {  功能:                                                   }
 {  修改历史：1.20050513修改了函数CombinSQL使用中文字段时的bug
@@ -62,7 +65,8 @@ interface
 
 uses
   Windows, SysUtils, Forms,Classes,
-  Grids, DBGrids, DB, ADODB,StdCtrls, Controls, ExtCtrls,StrUtils, Buttons;
+  Grids, DBGrids, DB, ADODB,StdCtrls, Controls, ExtCtrls,StrUtils, Buttons,
+  DBAccess, MemDS, MyAccess;
 
 type
   TGetCodePos = (gcLeft,gcNone,gcRight,gcAll);
@@ -70,6 +74,7 @@ type
 type
   TfrmADOGetcode = class(TForm)
     ADO_codestr: TADOQuery;
+    MyQry_codestr: TMyQuery;
     Ds_codestr: TDataSource;
     Panel4: TPanel;
     Panel1: TPanel;
@@ -108,6 +113,7 @@ type
   private
     { Private declarations }
     FConnection:TADOConnection;
+    FMyConnection:TMyConnection;
     Fopenstr:STRING;
     FInValue:STRING;
     FInField:STRING;
@@ -121,6 +127,7 @@ type
     FifAbetChineseChar:boolean;
     FShowX,FShowY:integer;
     procedure FSetConnection(value:TADOConnection);
+    procedure FSetMyConnection(value:TMyConnection);
     procedure FSetOpenStr(value:string);
     procedure FSetInValue(value:string);
     procedure FSetInField(value:string);
@@ -145,6 +152,7 @@ type
   published
     { Published declarations }
     property Connection:TADOConnection read FConnection write FSetConnection;
+    property MyConnection:TMyConnection read FMyConnection write FSetMyConnection;
     property OpenStr:string read FOpenStr write FSetOpenStr;
     property IfNullGetCode:boolean read FIfNullGetCode write FsetIfNullGetCode;
     Property IfShowDialogOneRecord:boolean read FIfShowDialogOneRecord write FsetIfShowDialogOneRecord;//只有一条记录时是否显示对话框
@@ -242,21 +250,21 @@ BEGIN
     result:=tmpOpenStr;
 END;
 
-function CombinOutValue(ADO_codestr:tadoquery):TStrings;
+function CombinOutValue(ADataSet:TDataSet):TStrings;
 var
   sFieldName:string;
   i,iField:integer;
 begin
   Result := TStringList.Create;
   
-  if not ADO_codestr.Active then exit;
-  if ADO_codestr.RecordCount=0 then exit;
+  if not ADataSet.Active then exit;
+  if ADataSet.RecordCount=0 then exit;
   
-  iField:=ADO_codestr.FieldCount;
+  iField:=ADataSet.FieldCount;
   for i :=0  to iField-1 do
   begin
-    sFieldName:=ADO_codestr.Fields[i].FieldName;
-    Result.Add(trim(ADO_codestr.fieldbyname(sFieldName).AsString));
+    sFieldName:=ADataSet.Fields[i].FieldName;
+    Result.Add(trim(ADataSet.fieldbyname(sFieldName).AsString));
   end;
 end;
 
@@ -288,35 +296,43 @@ procedure TfrmADOGetcode.LabeledEdit1Change(Sender: TObject);
 var
   sqltemp:string;
 begin
-  ADO_codestr.Close;
+  Ds_codestr.DataSet.Close;
+
   ADO_codestr.SQL.Clear;
+  MyQry_codestr.SQL.Clear;
+  
   sqltemp:=CombinSQL(POPENSTR,pInField,LabeledEdit1.Text,pGetCodePos);
-  ADO_codestr.SQL.Add(sqltemp);//+' order by '+InField);
-  ADO_codestr.Open;
-  if ADO_codestr.RecordCount=0 then clearstringgrid(StringGrid1);//更新StringGrid中的内容
+
+  ADO_codestr.SQL.Add(sqltemp);
+  MyQry_codestr.SQL.Add(sqltemp);
+  
+  Ds_codestr.DataSet.Open;
+  
+  if Ds_codestr.DataSet.RecordCount=0 then clearstringgrid(StringGrid1);//更新StringGrid中的内容
 end;
 
 procedure TfrmADOGetcode.LabeledEdit1KeyDown(Sender: TObject; var Key: Word;
   Shift: TShiftState);
 begin
+  //向下键
   if key=40 then dbgrid1.SetFocus;
 end;
 
 procedure TfrmADOGetcode.FormKeyDown(Sender: TObject; var Key: Word;
   Shift: TShiftState);
 begin
-  if key=13 then DBGrid1DblClick(nil);//设置窗体的KeyPreview为真才会触发该事件
+  if key=13 then DBGrid1DblClick(DBGrid1);//设置窗体的KeyPreview为真才会触发该事件
 end;
 
 procedure TfrmADOGetcode.DBGrid1DblClick(Sender: TObject);
 begin
-  if(not ADO_codestr.Active)or(ADO_codestr.RecordCount=0) then
+  if(not (Sender as TDBGrid).DataSource.DataSet.Active)or((Sender as TDBGrid).DataSource.DataSet.RecordCount=0) then
   begin
     pResult:=false;
     exit;
   end;
 
-  pOutValue:=CombinOutValue(ADO_codestr);
+  pOutValue:=CombinOutValue((Sender as TDBGrid).DataSource.DataSet);
 
   pResult:=true;
   close;
@@ -325,10 +341,12 @@ end;
 procedure TfrmADOGetcode.DBGrid1KeyDown(Sender: TObject; var Key: Word;
   Shift: TShiftState);
 begin
-  if(key=38)and(ADO_codestr.Bof) then LabeledEdit1.SetFocus;
+  //向上键
+  if(key=38)and((Sender as TDBGrid).DataSource.DataSet.Bof) then LabeledEdit1.SetFocus;
 end;
 
 procedure TfrmADOGetcode.ADO_codestrAfterScroll(DataSet: TDataSet);
+//ADO_codestr、MyQry_codestr共用该事件
 var
   i:integer;
   sFieldName:string;
@@ -388,28 +406,40 @@ begin
   end;
   //if ffrmGetcode=nil then
   ffrmADOGetcode:=TfrmADOGetcode.Create(nil);
-  ffrmADOGetcode.ADO_codestr.Connection:=fconnection;
-  ffrmADOGetcode.ADO_codestr.Close;
+  if Assigned(fconnection) then
+  begin
+    ffrmADOGetcode.ADO_codestr.Connection:=fconnection;
+    ffrmADOGetcode.Ds_codestr.DataSet:=ffrmADOGetcode.ADO_codestr;
+  end;
+  if Assigned(fMyconnection) then
+  begin
+    ffrmADOGetcode.MyQry_codestr.Connection:=fMyconnection;
+    ffrmADOGetcode.Ds_codestr.DataSet:=ffrmADOGetcode.MyQry_codestr;
+  end;
+  ffrmADOGetcode.Ds_codestr.DataSet.Close;
   ffrmADOGetcode.ADO_codestr.SQL.Clear;
+  ffrmADOGetcode.MyQry_codestr.SQL.Clear;
   sqltemp:=CombinSQL(OPENSTR,InField,InValue,GetCodePos);
   ffrmADOGetcode.ADO_codestr.SQL.Add(sqltemp);
-  ffrmADOGetcode.ADO_codestr.Open;
-  if(ffrmADOGetcode.ADO_codestr.RecordCount=0)and(not FIfShowDialogZeroRecord)then
+  ffrmADOGetcode.MyQry_codestr.SQL.Add(sqltemp);
+  ffrmADOGetcode.Ds_codestr.DataSet.Open;
+  if(ffrmADOGetcode.Ds_codestr.DataSet.RecordCount=0)and(not FIfShowDialogZeroRecord)then
   begin
     result:=false;
     ffrmADOGetcode.Free;
     ffrmADOGetcode:=nil;
     exit;
   end;
-  if(ffrmADOGetcode.ADO_codestr.RecordCount=1)and(not FIfShowDialogOneRecord)then
+  if(ffrmADOGetcode.Ds_codestr.DataSet.RecordCount=1)and(not FIfShowDialogOneRecord)then
   begin
     result:=true;
-    ffrmADOGetcode.pOutValue:=CombinOutValue(ffrmADOGetcode.ADO_codestr);
+    ffrmADOGetcode.pOutValue:=CombinOutValue(ffrmADOGetcode.Ds_codestr.DataSet);
     fOutValue:=ffrmADOGetcode.pOutValue;
     ffrmADOGetcode.Free;
     ffrmADOGetcode:=nil;
     exit;
   end;
+
   ffrmADOGetcode.pInField:=fInField;
   ffrmADOGetcode.pInFieldLabel:=FInFieldLabel;
   ffrmADOGetcode.pInValue:=fInValue;
@@ -429,6 +459,12 @@ procedure TADOLYGetcode.FSetConnection(value: TADOConnection);
 begin
   if value=FConnection then exit;
   FConnection:=value;
+end;
+
+procedure TADOLYGetcode.FSetMyConnection(value: TMyConnection);
+begin
+  if value=FMyConnection then exit;
+  FMyConnection:=value;
 end;
 
 procedure TADOLYGetcode.fsetGetCodePos(CONST value: tGetCodePos);

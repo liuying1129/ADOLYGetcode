@@ -104,8 +104,12 @@ object frmADOGetcode: TfrmADOGetcode
     Top = 72
   end
   object Ds_codestr: TDataSource
-    DataSet = ADO_codestr
     Left = 152
     Top = 72
+  end
+  object MyQry_codestr: TMyQuery
+    AfterScroll = ADO_codestrAfterScroll
+    Left = 112
+    Top = 104
   end
 end
